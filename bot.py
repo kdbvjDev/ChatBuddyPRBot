@@ -1,5 +1,7 @@
+from email import message
 import os
 import logging
+from turtle import up
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, \
@@ -16,7 +18,7 @@ GPT_TOKEN = os.getenv("ChatGPT_TOKEN")
 chat_gpt = ChatGptService(GPT_TOKEN)
 
 # Константы состояний
-MENU, RANDOM, GPT, TALK, QUIZ = range(5)
+MENU, RANDOM, GPT, TALK, QUIZ, TRANSLATE = range(6)
 
 # Enable logging
 logging.basicConfig(
@@ -43,7 +45,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'random': 'Узнать случайный интересный факт 🧠',
         'gpt': 'Задать вопрос чату GPT 🤖',
         'talk': 'Поговорить с известной личностью 👤',
-        'quiz': 'Поучаствовать в квизе ❓'
+        'quiz': 'Поучаствовать в квизе ❓',
+        'translate': 'перевод текстов'
     })
     return MENU
 
@@ -151,14 +154,30 @@ async def quiz_dialog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return QUIZ
 
-# async def translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     await send_text_buttons(update, context, 'Вы выбрали режим переводчика', {
-#         'ru': 'Русский',
-#         'en': 'English'
-#     })
+async def translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_gpt.set_prompt('ты переводчик, сам определяешь на каком языке написан текст и переводишь на выбранный пользователем')
+    await send_text_buttons(update, context, 'Вы выбрали режим переводчика', {
+        'ru': 'Русский',
+        'en': 'English'
+    })
+    return TRANSLATE
 
+async def translate_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await send_text(update, context, 'Пришлите ваш текст для перевода')
+    cb = update.callback_query.data
+    await chat_gpt.add_message(cb)
+    return TRANSLATE
 
-
+async def translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message:  # Убедитесь, что сообщение существует
+        text = update.message.text
+        msg = await send_text(update, context, 'В процессе перевода...')
+        
+        # Предположим, что add_message асинхронная функция
+        ans = await chat_gpt.add_message(text)  # Передаем текст, который нужно перевести
+        await msg.edit_text(ans)  # Редактируем сообщение с переводом
+    return TRANSLATE
 
 def main() -> None:
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -170,7 +189,8 @@ def main() -> None:
                 CommandHandler('random', random),
                 CommandHandler('gpt', gpt_mode),
                 CommandHandler('talk', talk_with_person),
-                CommandHandler('quiz', quiz),  # Добавляем квиз в меню
+                CommandHandler('quiz', quiz),  # Добаляем квиз в меню
+                CommandHandler('translate', translate)
             ],
             RANDOM: [
                 CallbackQueryHandler(random_button, pattern='random_'),
@@ -191,6 +211,10 @@ def main() -> None:
                 CallbackQueryHandler(cancel, pattern='end'),  # Для завершения квиза
                 MessageHandler(filters.TEXT & ~filters.COMMAND, quiz_dialog),  # Для обработки ответов
             ],
+            TRANSLATE: [CallbackQueryHandler(translate_button),
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, translate_mode)
+            ],
+
         },
         fallbacks=[CommandHandler('start', start)],
     )
